@@ -1,0 +1,10 @@
+{
+  "name": "claude-relay",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "HTTP relay exposing the Claude Agent SDK (subscription auth via Claude Code) to the Claude Mobile Obsidian plugin.",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "latest"
+  }
+}

@@ -1,0 +1,10 @@
+# secrets / local state — never commit
+config.json
+data.json
+
+# dependencies & logs
+node_modules/
+*.log
+
+# OS noise
+.DS_Store
