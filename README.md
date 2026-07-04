@@ -1,6 +1,10 @@
-# Claude Mobile for Obsidian
+# Vault Companion for Claude
+
+[![CI](https://github.com/estrenuo/vault-companion-for-claude/actions/workflows/ci.yml/badge.svg)](https://github.com/estrenuo/vault-companion-for-claude/actions/workflows/ci.yml)
 
 Chat with Claude inside Obsidian on **iPhone, iPad, Android, and desktop** — including agentic access to your vault (read, search, create, and update notes), with an approval card for every write.
+
+> This is an independent community plugin. It is not affiliated with or endorsed by Anthropic. Claude is a trademark of Anthropic, PBC.
 
 Existing Claude integrations for Obsidian (such as Claudian) embed the Claude Code CLI as a child process, which makes them desktop-only: mobile Obsidian has no Node runtime and cannot spawn processes. This plugin takes a different route and therefore runs anywhere Obsidian runs.
 
@@ -28,9 +32,9 @@ The catch: your Mac must be on and reachable from your mobile device — same Wi
 
 ### Plugin (all devices)
 
-1. Copy `main.js`, `manifest.json`, and `styles.css` into `<vault>/.obsidian/plugins/claude-mobile/` (or download them from the latest [release](../../releases)).
-2. Obsidian → Settings → Community plugins → disable Restricted mode → enable **Claude Mobile**.
-3. Open Settings → Claude Mobile and configure a backend.
+1. Copy `main.js`, `manifest.json`, and `styles.css` into `<vault>/.obsidian/plugins/vault-companion-for-claude/` (or download them from the latest [release](../../releases)).
+2. Obsidian → Settings → Community plugins → disable Restricted mode → enable **Vault Companion for Claude**.
+3. Open the plugin's settings and configure a backend.
 
 The plugin folder syncs with your vault (iCloud/Obsidian Sync), so you install once and enable per device.
 
@@ -52,6 +56,14 @@ Health check: `curl http://<mac-ip>:8814/health` → `{"ok":true}`.
 - **Every write needs approval** — unless you enable *Auto-approve ("YOLO") mode*, which skips all cards and (via the relay) also lets Claude run Bash on the Mac unattended. Auto-approved actions remain visible in the chat and the header shows a YOLO indicator.
 - The relay authenticates every request (constant-time bearer token comparison); the unauthenticated `/health` endpoint reveals nothing but liveness.
 - Relay traffic is plain HTTP — run it over a VPN or trusted LAN only, and never port-forward 8814 to the internet.
+
+## Disclosures
+
+Per Obsidian's developer policies, in plain terms:
+
+- **Network use.** The API backend sends your prompts and any note content Claude reads to `api.anthropic.com`. The relay backend sends them to a server **you** run on your own machine, which in turn uses the Claude Agent SDK (Anthropic). Nothing is sent anywhere else; there is no telemetry.
+- **Accounts and payment required.** The plugin is useless without either an Anthropic API key (paid, per token) or a Claude subscription plus a self-hosted relay. Neither is included.
+- **Files are read and written.** Claude can read any file in your vault via its tools, and — after your approval, or without it in YOLO mode — create and modify notes. The relay backend additionally allows approved Bash commands on the relay machine.
 
 ## Limitations
 

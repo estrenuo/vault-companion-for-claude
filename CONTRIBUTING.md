@@ -14,7 +14,7 @@ For the relay (`relay/server.mjs`): `cd relay && npm install`, create a `config.
 
 ## Before you open a PR
 
-- `node --check main.js` and `node --check relay/server.mjs` must pass.
+- `node test/run.js` must pass (also enforced by CI on every PR), along with `node --check main.js` and `node --check relay/server.mjs`.
 - Test the path you touched by hand: API backend, relay backend, or both. State in the PR which you tested on which platform (desktop / iOS / Android).
 - Anything touching approvals, secrets, or the relay auth path is security-relevant: explain your reasoning in the PR description, not just the diff.
 - Match the existing style (plain JS, no dependencies in the plugin, no framework). PRs that introduce a bundler or TypeScript need a very good argument.
@@ -39,7 +39,7 @@ Release checklist (maintainers):
 1. Bump `version` in `manifest.json`.
 2. Add the new version to `versions.json` mapping it to the minimum Obsidian `minAppVersion`.
 3. Add a dated entry to `CHANGELOG.md` (Keep a Changelog format).
-4. Commit, tag `vX.Y.Z`, push with `--tags`.
-5. Create a GitHub release for the tag and attach `main.js`, `manifest.json`, and `styles.css` as individual assets (Obsidian community-plugin convention).
+4. Commit, tag `X.Y.Z` (bare version, **no `v` prefix** — required by the Obsidian community-plugin pipeline), push with `--tags`.
+5. Create a GitHub release named exactly `X.Y.Z` for that tag and attach `main.js`, `manifest.json`, and `styles.css` as individual assets.
 
 The relay and plugin are versioned together; a relay protocol change (the NDJSON event shapes or endpoints) is at least a minor bump and must be called out in the changelog.

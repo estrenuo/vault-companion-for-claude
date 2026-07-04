@@ -1,9 +1,10 @@
 {
-  "id": "claude-mobile",
-  "name": "Claude Mobile",
-  "version": "1.3.0",
+  "id": "vault-companion-for-claude",
+  "name": "Vault Companion for Claude",
+  "version": "1.4.0",
   "minAppVersion": "1.5.0",
-  "description": "Chat with Claude on any device (including iPhone/iPad) via the Anthropic API. Claude can read, search, create, and update notes in your vault — writes require your approval.",
+  "description": "Chat with Claude on desktop and mobile. Claude reads, searches, creates, and updates notes in your vault with your approval — via your own Anthropic API key or your Claude subscription through a self-hosted relay.",
   "author": "Sander Robijns",
+  "authorUrl": "https://github.com/estrenuo",
   "isDesktopOnly": false
 }

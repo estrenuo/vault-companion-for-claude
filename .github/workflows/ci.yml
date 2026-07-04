@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Syntax checks
+        run: |
+          node --check main.js
+          node --check relay/server.mjs
+          bash -n relay/install.sh
+
+      - name: Validate JSON
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('versions.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('relay/package.json','utf8'))"
+
+      - name: Manifest / versions.json consistency
+        run: |
+          node -e "
+            const m = require('./manifest.json');
+            const v = require('./versions.json');
+            if (!/^\d+\.\d+\.\d+$/.test(m.version)) throw new Error('manifest version must be x.y.z');
+            if (!v[m.version]) throw new Error('manifest version ' + m.version + ' missing from versions.json');
+            if (/obsidian/i.test(m.id)) throw new Error('plugin id must not contain \"obsidian\"');
+          "
+
+      - name: Unit tests
+        run: node test/run.js

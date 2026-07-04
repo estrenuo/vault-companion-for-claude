@@ -28,6 +28,12 @@ const API_VERSION = '2023-06-01';
 
 /** Stored per-device (Obsidian localStorage), never written to synced data.json. */
 const SECRET_KEYS = ['apiKey', 'relayToken'];
+/**
+ * localStorage key prefix. Deliberately kept at the pre-rename value
+ * ("claude-mobile:") so existing devices don't lose stored secrets when the
+ * plugin was renamed to "Vault Companion for Claude". Do not change.
+ */
+const LS_PREFIX = 'claude-mobile:';
 
 const DEFAULT_SETTINGS = {
   backend: 'api', // 'api' (Anthropic API key) | 'relay' (Mac relay / Claude subscription)
@@ -1006,8 +1012,8 @@ class ClaudeMobilePlugin extends Plugin {
     let migrated = false;
     for (const k of SECRET_KEYS) {
       if (data[k]) {
-        if (!this.app.loadLocalStorage('claude-mobile:' + k)) {
-          this.app.saveLocalStorage('claude-mobile:' + k, data[k]);
+        if (!this.app.loadLocalStorage(LS_PREFIX + k)) {
+          this.app.saveLocalStorage(LS_PREFIX + k, data[k]);
         }
         delete data[k];
         migrated = true;
@@ -1015,7 +1021,7 @@ class ClaudeMobilePlugin extends Plugin {
     }
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
     for (const k of SECRET_KEYS) {
-      this.settings[k] = this.app.loadLocalStorage('claude-mobile:' + k) || '';
+      this.settings[k] = this.app.loadLocalStorage(LS_PREFIX + k) || '';
     }
     if (migrated) await this.saveData(this.stripSecrets());
   }
@@ -1028,7 +1034,7 @@ class ClaudeMobilePlugin extends Plugin {
 
   async saveSettings() {
     for (const k of SECRET_KEYS) {
-      this.app.saveLocalStorage('claude-mobile:' + k, this.settings[k] || null);
+      this.app.saveLocalStorage(LS_PREFIX + k, this.settings[k] || null);
     }
     await this.saveData(this.stripSecrets());
   }

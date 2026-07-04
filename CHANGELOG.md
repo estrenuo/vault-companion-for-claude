@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - 2026-07-04
+
+### Changed
+- Renamed from "Claude Mobile" to **Vault Companion for Claude** (plugin id `vault-companion-for-claude`) to comply with trademark naming guidance. Device-local secret storage keeps its original key prefix, so stored API keys and relay tokens survive the rename.
+- Release tags now use the bare version number (`1.4.0`, no `v` prefix), per Obsidian community-plugin convention.
+
+### Added
+- CI workflow (GitHub Actions): syntax checks, JSON and version-map validation, unit tests.
+- Unit test suite (`test/`) covering SSE stream parsing, vault tools, the approval contract, and per-device secret handling.
+- README disclosures section (network use, account/payment requirements, file access) per Obsidian developer policies.
+
 ## [1.3.0] - 2026-07-04
 
 ### Added
