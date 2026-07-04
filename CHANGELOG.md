@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.1] - 2026-07-04
+
+### Added
+- Release workflow with GitHub artifact attestations: release assets (`main.js`, `manifest.json`, `styles.css`) are now built, attested, and published by GitHub Actions on tag push, addressing the community-directory review recommendation. Verify with `gh attestation verify`.
+- README disclosure for vault enumeration by `search_vault` (all file paths are visible to the plugin; matches are sent to the configured backend).
+
 ## [1.4.0] - 2026-07-04
 
 ### Changed

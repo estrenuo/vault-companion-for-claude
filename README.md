@@ -64,6 +64,8 @@ Per Obsidian's developer policies, in plain terms:
 - **Network use.** The API backend sends your prompts and any note content Claude reads to `api.anthropic.com`. The relay backend sends them to a server **you** run on your own machine, which in turn uses the Claude Agent SDK (Anthropic). Nothing is sent anywhere else; there is no telemetry.
 - **Accounts and payment required.** The plugin is useless without either an Anthropic API key (paid, per token) or a Claude subscription plus a self-hosted relay. Neither is included.
 - **Files are read and written.** Claude can read any file in your vault via its tools, and — after your approval, or without it in YOLO mode — create and modify notes. The relay backend additionally allows approved Bash commands on the relay machine.
+- **Vault enumeration.** The `search_vault` tool lists all markdown files in the vault (via Obsidian's `getMarkdownFiles`) to search them; every file path is therefore visible to the plugin, and matching paths/snippets are sent to the backend you configured. This is inherent to search — if that's not acceptable, don't use the plugin.
+- **Release provenance.** Releases are built and attested by GitHub Actions. Verify any downloaded asset with `gh attestation verify main.js -R estrenuo/vault-companion-for-claude`.
 
 ## Limitations
 

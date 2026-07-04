@@ -40,6 +40,6 @@ Release checklist (maintainers):
 2. Add the new version to `versions.json` mapping it to the minimum Obsidian `minAppVersion`.
 3. Add a dated entry to `CHANGELOG.md` (Keep a Changelog format).
 4. Commit, tag `X.Y.Z` (bare version, **no `v` prefix** — required by the Obsidian community-plugin pipeline), push with `--tags`.
-5. Create a GitHub release named exactly `X.Y.Z` for that tag and attach `main.js`, `manifest.json`, and `styles.css` as individual assets.
+5. The `Release` workflow creates the GitHub release automatically on tag push, attaching `main.js`, `manifest.json`, and `styles.css` with artifact attestations. Do not create releases by hand — hand-made releases lack attestations.
 
 The relay and plugin are versioned together; a relay protocol change (the NDJSON event shapes or endpoints) is at least a minor bump and must be called out in the changelog.
