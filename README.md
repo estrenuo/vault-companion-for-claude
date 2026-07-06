@@ -50,12 +50,14 @@ This copies the relay to `~/claude-relay`, installs the Agent SDK, generates a b
 
 Health check: `curl http://<mac-ip>:8814/health` → `{"ok":true}`.
 
+**Recommended: reach the relay over Tailscale.** A home LAN IP is handed out by DHCP and can change on reboot, and it only works while your phone is on the same Wi-Fi. [Tailscale](https://tailscale.com) gives the Mac a stable address that never drifts and is reachable from anywhere — over cellular or any other network — without port-forwarding. Install it on the Mac and your mobile device, then use the Mac's Tailscale IP (`100.x.y.z`) or, with MagicDNS enabled, its hostname (`http://<machine>.<tailnet>.ts.net:8814`) as the Relay URL. The relay already listens on all interfaces, so no relay-side change is needed. Because Tailscale is WireGuard, all relay traffic is then end-to-end encrypted even though the URL is plain `http://`.
+
 ## Security model
 
 - **Secrets stay on-device.** The API key and relay token are stored in Obsidian's per-device local storage — never in the vault, never in synced `data.json`. Enter them once per device.
 - **Every write needs approval** — unless you enable *Auto-approve ("YOLO") mode*, which skips all cards and (via the relay) also lets Claude run Bash on the Mac unattended. Auto-approved actions remain visible in the chat and the header shows a YOLO indicator.
 - The relay authenticates every request (constant-time bearer token comparison); the unauthenticated `/health` endpoint reveals nothing but liveness.
-- Relay traffic is plain HTTP — run it over a VPN or trusted LAN only, and never port-forward 8814 to the internet.
+- Relay traffic is plain HTTP — run it over a VPN or trusted LAN only, and never port-forward 8814 to the internet. Tailscale (WireGuard) is the recommended path and encrypts this traffic end-to-end (see [Relay installation](#relay-mac-optional--for-subscription-backend)). Note that any device on your tailnet can reach port 8814, so the bearer token still matters; restrict access with a Tailscale ACL if your tailnet is shared.
 
 ## Disclosures
 
