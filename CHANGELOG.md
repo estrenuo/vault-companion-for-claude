@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.5.0] - 2026-07-15
 
 ### Added
 - Context bar above the input: the currently open note is included in Claude's context automatically (live — it follows as you switch notes), and a "+" button pins additional notes via a fuzzy file picker. Pills show the context set; tap × to remove a pinned note or exclude the active note (tap the dimmed pill to re-include it). "New chat" resets the context.
