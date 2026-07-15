@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.1] - 2026-07-15
+
+### Changed
+- README: vault-enumeration disclosure reworded to match the community-directory review response — enumeration is inherent to `search_vault` and the context file picker; the Private folders boundary (1.6.0) and its relay limitation are stated explicitly.
+
 ## [1.6.0] - 2026-07-15
 
 ### Added
