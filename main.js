@@ -16,6 +16,7 @@ const {
   Setting,
   Notice,
   MarkdownRenderer,
+  FuzzySuggestModal,
   TFile,
   TFolder,
   normalizePath,
@@ -129,6 +130,111 @@ const TOOLS = [
 const READ_CAP = 60000; // chars returned per file read
 const SEARCH_MAX_FILES = 15;
 const SEARCH_CONTENT_MAX_BYTES = 300 * 1024;
+const CONTEXT_FILE_CAP = 20000; // chars per context document injected into the prompt
+
+/* ------------------------------------------------------------------ */
+/* Chat context (active note + pinned documents)                       */
+/* ------------------------------------------------------------------ */
+
+/** Per-chat context set: the live active note plus manually pinned documents. */
+class ChatContext {
+  constructor() {
+    this.reset();
+  }
+
+  reset() {
+    this.pinned = [];
+    this.includeActive = true;
+    this.lastSentSignature = null; // relay backend: context block sent when this changes
+  }
+
+  pin(path) {
+    if (!this.pinned.includes(path)) this.pinned.push(path);
+  }
+
+  unpin(path) {
+    this.pinned = this.pinned.filter((p) => p !== path);
+  }
+
+  /** Active note first (when enabled), then pinned docs, deduplicated. */
+  resolvePaths(activePath) {
+    const out = [];
+    if (this.includeActive && activePath) out.push(activePath);
+    for (const p of this.pinned) if (!out.includes(p)) out.push(p);
+    return out;
+  }
+}
+
+/** Read context documents; missing files come back as { path, missing: true }. */
+async function readContextDocs(app, paths) {
+  const docs = [];
+  for (const path of paths) {
+    const f = app.vault.getAbstractFileByPath(normalizePath(path));
+    if (!(f instanceof TFile)) {
+      docs.push({ path: path, missing: true });
+      continue;
+    }
+    let content = await app.vault.cachedRead(f);
+    let truncated = false;
+    if (content.length > CONTEXT_FILE_CAP) {
+      content = content.slice(0, CONTEXT_FILE_CAP);
+      truncated = true;
+    }
+    docs.push({ path: path, content: content, truncated: truncated, mtime: f.stat.mtime });
+  }
+  return docs;
+}
+
+function buildContextSection(docs) {
+  const present = docs.filter((d) => !d.missing);
+  if (!present.length) return '';
+  let out =
+    '\n\n--- CONTEXT DOCUMENTS (attached by the user; content is already provided below, no need to read these files again) ---';
+  for (const d of present) {
+    out += '\n\n=== ' + d.path + ' ===\n' + d.content;
+    if (d.truncated)
+      out += '\n[... truncated at ' + CONTEXT_FILE_CAP + ' characters — use read_note for the rest ...]';
+  }
+  out += '\n--- END CONTEXT DOCUMENTS ---';
+  return out;
+}
+
+/** Cheap change signature: paths + mtimes (content changes bump mtime). */
+function contextSignature(docs) {
+  return docs
+    .filter((d) => !d.missing)
+    .map((d) => d.path + ':' + (d.mtime || 0))
+    .join('|');
+}
+
+/**
+ * Relay backend: the server-side session already holds earlier turns, so the
+ * context block is prepended only when the context set changed since the last
+ * message in this session.
+ */
+function buildRelayPrompt(text, docs, lastSig) {
+  const sig = contextSignature(docs);
+  if (!docs.length || sig === lastSig) return { prompt: text, sig: sig };
+  return { prompt: buildContextSection(docs).trim() + '\n\n' + text, sig: sig };
+}
+
+/** Fuzzy picker over all markdown files, used by the "+" button in the context bar. */
+class ContextFileSuggestModal extends FuzzySuggestModal {
+  constructor(app, onChoose) {
+    super(app);
+    this.onChoose = onChoose;
+    this.setPlaceholder('Add a note to the chat context…');
+  }
+  getItems() {
+    return this.app.vault.getMarkdownFiles();
+  }
+  getItemText(f) {
+    return f.path;
+  }
+  onChooseItem(f) {
+    this.onChoose(f.path);
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* Anthropic API client                                                */
@@ -463,6 +569,7 @@ class ClaudeMobileView extends ItemView {
     this.sessionId = null; // Agent SDK session (relay backend)
     this.running = false;
     this.abortController = null;
+    this.context = new ChatContext();
     this.tools = new VaultTools(this.app, (name, input) => this.requestApproval(name, input));
   }
 
@@ -495,6 +602,10 @@ class ClaudeMobileView extends ItemView {
 
     this.messagesEl = root.createDiv({ cls: 'claude-mobile-messages' });
 
+    this.contextBarEl = root.createDiv({ cls: 'claude-mobile-context-bar' });
+    this.renderContextBar();
+    this.registerEvent(this.app.workspace.on('file-open', () => this.renderContextBar()));
+
     const inputRow = root.createDiv({ cls: 'claude-mobile-input-row' });
     this.inputEl = inputRow.createEl('textarea', {
       cls: 'claude-mobile-input',
@@ -522,6 +633,76 @@ class ClaudeMobileView extends ItemView {
     this.messages = [];
     this.sessionId = null;
     this.messagesEl.empty();
+    this.context.reset();
+    this.renderContextBar();
+  }
+
+  /* ------------------------ context bar ------------------------ */
+
+  renderContextBar() {
+    if (!this.contextBarEl) return;
+    this.contextBarEl.empty();
+
+    const addBtn = this.contextBarEl.createEl('button', {
+      text: '+',
+      cls: 'claude-mobile-btn claude-mobile-context-add',
+      attr: { 'aria-label': 'Add a note to the chat context' },
+    });
+    addBtn.onclick = () =>
+      new ContextFileSuggestModal(this.app, (path) => {
+        this.context.pin(path);
+        this.renderContextBar();
+      }).open();
+
+    const active = this.app.workspace.getActiveFile();
+    if (active) {
+      const off = !this.context.includeActive;
+      const pill = this.contextBarEl.createDiv({
+        cls: 'claude-mobile-context-pill claude-mobile-context-active' + (off ? ' claude-mobile-context-off' : ''),
+      });
+      pill.createSpan({ text: '◉ ' + active.basename });
+      if (off) {
+        pill.setAttr('aria-label', 'Active note excluded — tap to include it again');
+        pill.onclick = () => {
+          this.context.includeActive = true;
+          this.renderContextBar();
+        };
+      } else {
+        const x = pill.createSpan({ text: '×', cls: 'claude-mobile-context-x' });
+        x.onclick = () => {
+          this.context.includeActive = false;
+          this.renderContextBar();
+        };
+      }
+    }
+
+    for (const path of this.context.pinned) {
+      if (this.context.includeActive && active && path === active.path) continue; // already shown as active pill
+      const pill = this.contextBarEl.createDiv({ cls: 'claude-mobile-context-pill' });
+      const name = path.split('/').pop().replace(/\.md$/, '');
+      pill.createSpan({ text: name, attr: { title: path } });
+      const x = pill.createSpan({ text: '×', cls: 'claude-mobile-context-x' });
+      x.onclick = () => {
+        this.context.unpin(path);
+        this.renderContextBar();
+      };
+    }
+  }
+
+  /** Resolve + read the context set; skips (and unpins) files that no longer exist. */
+  async collectContextDocs() {
+    const active = this.app.workspace.getActiveFile();
+    const paths = this.context.resolvePaths(active ? active.path : null);
+    const docs = await readContextDocs(this.app, paths);
+    let dropped = false;
+    for (const d of docs) {
+      if (!d.missing) continue;
+      this.addSystemNotice('Context document not found, skipped: ' + d.path);
+      this.context.unpin(d.path);
+      dropped = true;
+    }
+    if (dropped) this.renderContextBar();
+    return docs.filter((d) => !d.missing);
   }
 
   addSystemNotice(text) {
@@ -548,7 +729,7 @@ class ClaudeMobileView extends ItemView {
     if (this.abortController) this.abortController.abort();
   }
 
-  async buildSystemPrompt() {
+  async buildSystemPrompt(contextDocs) {
     const s = this.plugin.settings;
     let sys =
       'You are Claude, embedded in the Obsidian app on the user\'s device (possibly a phone or tablet). ' +
@@ -558,8 +739,7 @@ class ClaudeMobileView extends ItemView {
       'Keep responses concise; the user may be on a small screen. ' +
       'Today\'s date: ' + new Date().toISOString().slice(0, 10) + '.';
 
-    const active = this.app.workspace.getActiveFile();
-    if (active) sys += '\nCurrently open note: ' + active.path;
+    sys += buildContextSection(contextDocs || []);
 
     if (s.includeClaudeMd) {
       const f = this.app.vault.getAbstractFileByPath('CLAUDE.md');
@@ -603,7 +783,8 @@ class ClaudeMobileView extends ItemView {
     this.abortController = new AbortController();
 
     try {
-      const system = await this.buildSystemPrompt();
+      const contextDocs = await this.collectContextDocs();
+      const system = await this.buildSystemPrompt(contextDocs);
       let iterations = 0;
 
       while (iterations < this.plugin.settings.maxToolIterations) {
@@ -693,6 +874,9 @@ class ClaudeMobileView extends ItemView {
     this.abortController = new AbortController();
 
     try {
+      const contextDocs = await this.collectContextDocs();
+      const { prompt, sig } = buildRelayPrompt(text, contextDocs, this.context.lastSentSignature);
+
       const resp = await fetch(base + '/chat', {
         method: 'POST',
         signal: this.abortController.signal,
@@ -700,12 +884,13 @@ class ClaudeMobileView extends ItemView {
           'content-type': 'application/json',
           authorization: 'Bearer ' + s.relayToken,
         },
-        body: JSON.stringify({ prompt: text, sessionId: this.sessionId }),
+        body: JSON.stringify({ prompt: prompt, sessionId: this.sessionId }),
       });
       if (!resp.ok) {
         const t = await resp.text();
         throw new Error('Relay error ' + resp.status + ': ' + t.slice(0, 200));
       }
+      this.context.lastSentSignature = sig;
 
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();

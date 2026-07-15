@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Context bar above the input: the currently open note is included in Claude's context automatically (live — it follows as you switch notes), and a "+" button pins additional notes via a fuzzy file picker. Pills show the context set; tap × to remove a pinned note or exclude the active note (tap the dimmed pill to re-include it). "New chat" resets the context.
+- Context injection on both backends: the API backend embeds document contents in the system prompt (capped at 20,000 characters per file, with a visible truncation note); the relay backend prepends the context block to the prompt only when the context set changed since the previous message in the session.
+
+### Changed
+- The system prompt line "Currently open note: <path>" is replaced by the full context-documents section.
+
 ## [1.4.1] - 2026-07-04
 
 ### Added

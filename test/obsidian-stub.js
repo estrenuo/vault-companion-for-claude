@@ -8,6 +8,12 @@ class Setting {}
 class Notice {}
 class TFile {}
 class TFolder {}
+class FuzzySuggestModal {
+  constructor(app) {
+    this.app = app;
+  }
+  setPlaceholder() {}
+}
 
 module.exports = {
   Plugin,
@@ -17,6 +23,7 @@ module.exports = {
   Notice,
   TFile,
   TFolder,
+  FuzzySuggestModal,
   MarkdownRenderer: { render: async () => {} },
   normalizePath: (p) => p.replace(/^\/+/, ''),
   requestUrl: async () => ({ status: 500, text: 'stub', json: null }),

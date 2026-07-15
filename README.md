@@ -4,6 +4,8 @@
 
 Chat with Claude inside Obsidian on **iPhone, iPad, Android, and desktop** — including agentic access to your vault (read, search, create, and update notes), with an approval card for every write.
 
+The note you have open is automatically part of Claude's context, live: switch notes and the context follows. A context bar above the input lets you pin additional notes (fuzzy file picker) or remove any of them, including the active note.
+
 > This is an independent community plugin. It is not affiliated with or endorsed by Anthropic. Claude is a trademark of Anthropic, PBC.
 
 Existing Claude integrations for Obsidian (such as Claudian) embed the Claude Code CLI as a child process, which makes them desktop-only: mobile Obsidian has no Node runtime and cannot spawn processes. This plugin takes a different route and therefore runs anywhere Obsidian runs.
@@ -64,6 +66,7 @@ Health check: `curl http://<mac-ip>:8814/health` → `{"ok":true}`.
 Per Obsidian's developer policies, in plain terms:
 
 - **Network use.** The API backend sends your prompts and any note content Claude reads to `api.anthropic.com`. The relay backend sends them to a server **you** run on your own machine, which in turn uses the Claude Agent SDK (Anthropic). Nothing is sent anywhere else; there is no telemetry.
+- **Automatic context.** The content of the currently open note (and any notes you pin in the context bar) is sent to the configured backend with your messages, without Claude having to request it. Remove the active-note pill (tap its ×) if you don't want that for a given chat.
 - **Accounts and payment required.** The plugin is useless without either an Anthropic API key (paid, per token) or a Claude subscription plus a self-hosted relay. Neither is included.
 - **Files are read and written.** Claude can read any file in your vault via its tools, and — after your approval, or without it in YOLO mode — create and modify notes. The relay backend additionally allows approved Bash commands on the relay machine.
 - **Vault enumeration.** The `search_vault` tool lists all markdown files in the vault (via Obsidian's `getMarkdownFiles`) to search them; every file path is therefore visible to the plugin, and matching paths/snippets are sent to the backend you configured. This is inherent to search — if that's not acceptable, don't use the plugin.

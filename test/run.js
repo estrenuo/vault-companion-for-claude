@@ -21,11 +21,20 @@ Module._resolveFilename = function (request, ...args) {
 // Load main.js with its module-private internals exposed for testing.
 const src =
   fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8') +
-  '\nmodule.exports.__test = { parseSseStream, VaultTools };';
+  '\nmodule.exports.__test = { parseSseStream, VaultTools, ChatContext, readContextDocs, buildContextSection, contextSignature, buildRelayPrompt, ClaudeMobileView };';
 const tmp = path.join(os.tmpdir(), 'vcfc-main-test-' + Date.now() + '.js');
 fs.writeFileSync(tmp, src);
 const PluginClass = require(tmp);
-const { parseSseStream, VaultTools } = PluginClass.__test;
+const {
+  parseSseStream,
+  VaultTools,
+  ChatContext,
+  readContextDocs,
+  buildContextSection,
+  contextSignature,
+  buildRelayPrompt,
+  ClaudeMobileView,
+} = PluginClass.__test;
 const { TFile } = require('obsidian');
 
 let failures = 0;
@@ -173,6 +182,103 @@ function fakeApp(files) {
     p.settings.relayToken = '';
     await p.saveSettings();
     assert.ok(!('claude-mobile:relayToken' in local));
+  });
+
+  await test('ChatContext: resolvePaths dedups active and pinned, respects includeActive', async () => {
+    const c = new ChatContext();
+    c.pin('a.md');
+    c.pin('b.md');
+    c.pin('a.md'); // duplicate pin is a no-op
+    assert.deepStrictEqual(c.resolvePaths('a.md'), ['a.md', 'b.md']);
+    assert.deepStrictEqual(c.resolvePaths('x.md'), ['x.md', 'a.md', 'b.md']);
+    c.includeActive = false;
+    assert.deepStrictEqual(c.resolvePaths('x.md'), ['a.md', 'b.md']);
+    c.unpin('a.md');
+    assert.deepStrictEqual(c.resolvePaths(null), ['b.md']);
+    c.reset();
+    assert.deepStrictEqual(c.resolvePaths(null), []);
+    assert.strictEqual(c.includeActive, true);
+  });
+
+  await test('Context: readContextDocs caps long files and flags missing ones', async () => {
+    const files = { 'big.md': 'x'.repeat(25000), 'small.md': 'hello' };
+    const { app } = fakeApp(files);
+    const docs = await readContextDocs(app, ['big.md', 'small.md', 'gone.md']);
+    assert.strictEqual(docs[0].content.length, 20000);
+    assert.ok(docs[0].truncated);
+    assert.strictEqual(docs[1].content, 'hello');
+    assert.ok(!docs[1].truncated);
+    assert.ok(docs[2].missing);
+  });
+
+  await test('Context: buildContextSection renders docs; empty without usable docs', async () => {
+    const s = buildContextSection([
+      { path: 'a.md', content: 'AAA', truncated: false },
+      { path: 'b.md', content: 'BBB', truncated: true },
+    ]);
+    assert.ok(s.includes('CONTEXT DOCUMENTS'));
+    assert.ok(s.includes('=== a.md ===') && s.includes('AAA'));
+    assert.ok(s.includes('truncated'));
+    assert.strictEqual(buildContextSection([]), '');
+    assert.strictEqual(buildContextSection([{ path: 'gone.md', missing: true }]), '');
+  });
+
+  await test('Context: signature tracks paths and mtimes, not content', async () => {
+    const a1 = [{ path: 'a.md', content: 'A', mtime: 1 }];
+    assert.strictEqual(contextSignature(a1), contextSignature([{ path: 'a.md', content: 'other', mtime: 1 }]));
+    assert.notStrictEqual(contextSignature(a1), contextSignature([{ path: 'a.md', content: 'A', mtime: 2 }]));
+    assert.notStrictEqual(
+      contextSignature(a1),
+      contextSignature([{ path: 'a.md', content: 'A', mtime: 1 }, { path: 'b.md', content: 'B', mtime: 1 }])
+    );
+  });
+
+  await test('Relay: context block prepended only when the context set changed', async () => {
+    const docs = [{ path: 'a.md', content: 'AAA', mtime: 1 }];
+    const first = buildRelayPrompt('hi', docs, null);
+    assert.ok(first.prompt.includes('=== a.md ===') && first.prompt.endsWith('hi'));
+    const second = buildRelayPrompt('again', docs, first.sig);
+    assert.strictEqual(second.prompt, 'again');
+    const changed = buildRelayPrompt('third', [{ path: 'a.md', content: 'AAA', mtime: 2 }], first.sig);
+    assert.ok(changed.prompt.includes('=== a.md ==='));
+    const none = buildRelayPrompt('bare', [], null);
+    assert.strictEqual(none.prompt, 'bare');
+  });
+
+  await test('View: buildSystemPrompt embeds context documents', async () => {
+    const files = { 'index.md': 'ACTIVE-CONTENT', 'pin.md': 'PINNED-CONTENT' };
+    const { app } = fakeApp(files);
+    const fake = {
+      app: app,
+      plugin: { settings: { includeClaudeMd: false, extraSystemPrompt: '' } },
+      context: new ChatContext(),
+      addSystemNotice: () => {},
+      renderContextBar: () => {},
+    };
+    fake.context.pin('pin.md');
+    const docs = await ClaudeMobileView.prototype.collectContextDocs.call(fake);
+    const sys = await ClaudeMobileView.prototype.buildSystemPrompt.call(fake, docs);
+    assert.ok(sys.includes('ACTIVE-CONTENT'));
+    assert.ok(sys.includes('PINNED-CONTENT'));
+    assert.strictEqual(sys.match(/=== index\.md ===/g).length, 1); // active note not duplicated
+  });
+
+  await test('View: collectContextDocs drops missing files with a notice and unpins them', async () => {
+    const files = { 'index.md': 'ACTIVE-CONTENT' };
+    const { app } = fakeApp(files);
+    const notices = [];
+    const fake = {
+      app: app,
+      plugin: { settings: { includeClaudeMd: false, extraSystemPrompt: '' } },
+      context: new ChatContext(),
+      addSystemNotice: (t) => notices.push(t),
+      renderContextBar: () => {},
+    };
+    fake.context.pin('gone.md');
+    const docs = await ClaudeMobileView.prototype.collectContextDocs.call(fake);
+    assert.deepStrictEqual(docs.map((d) => d.path), ['index.md']);
+    assert.ok(notices.length === 1 && notices[0].includes('gone.md'));
+    assert.ok(!fake.context.pinned.includes('gone.md'));
   });
 
   fs.unlinkSync(tmp);
