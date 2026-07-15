@@ -47,6 +47,8 @@ const DEFAULT_SETTINGS = {
   extraSystemPrompt: '',
   maxToolIterations: 15,
   autoApprove: false, // "YOLO" mode: skip all approval cards
+  excludedFolders: '', // newline/comma-separated path prefixes hidden from Claude
+  respectObsidianExcludes: true, // also honor Options → Files & links → Excluded files
 };
 
 /* ------------------------------------------------------------------ */
@@ -131,6 +133,53 @@ const READ_CAP = 60000; // chars returned per file read
 const SEARCH_MAX_FILES = 15;
 const SEARCH_CONTENT_MAX_BYTES = 300 * 1024;
 const CONTEXT_FILE_CAP = 20000; // chars per context document injected into the prompt
+
+/* ------------------------------------------------------------------ */
+/* Exclusions (private folders hidden from Claude)                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Compile exclusion rules from the plugin's own "excluded folders" setting
+ * plus (optionally) Obsidian's Options → Files & links → Excluded files.
+ * Obsidian entries wrapped in slashes are regexes; others are path prefixes.
+ */
+function exclusionRules(app, settings) {
+  const prefixes = String(settings.excludedFolders || '')
+    .split(/[\n,]/)
+    .map((s) => normalizePath(s.trim().replace(/\/+$/, '')))
+    .filter((s) => s && s !== '/');
+  const regexes = [];
+  if (settings.respectObsidianExcludes && app.vault.getConfig) {
+    const filters = app.vault.getConfig('userIgnoreFilters') || [];
+    for (const f of filters) {
+      if (typeof f !== 'string' || !f) continue;
+      if (f.length > 2 && f.startsWith('/') && f.endsWith('/')) {
+        try {
+          regexes.push(new RegExp(f.slice(1, -1), 'i'));
+        } catch (_) {
+          /* invalid regex in Obsidian settings: ignore */
+        }
+      } else {
+        const p = normalizePath(f.replace(/\/+$/, ''));
+        if (p && p !== '/') prefixes.push(p);
+      }
+    }
+  }
+  return { prefixes: prefixes, regexes: regexes };
+}
+
+/** Case-insensitive match on folder boundaries ("private" ≠ "privateer.md"). */
+function isPathExcluded(path, rules) {
+  const p = normalizePath(path).toLowerCase();
+  for (const pre of rules.prefixes) {
+    const pl = pre.toLowerCase();
+    if (p === pl || p.startsWith(pl + '/')) return true;
+  }
+  for (const re of rules.regexes) {
+    if (re.test(path)) return true;
+  }
+  return false;
+}
 
 /* ------------------------------------------------------------------ */
 /* Chat context (active note + pinned documents)                       */
@@ -220,13 +269,14 @@ function buildRelayPrompt(text, docs, lastSig) {
 
 /** Fuzzy picker over all markdown files, used by the "+" button in the context bar. */
 class ContextFileSuggestModal extends FuzzySuggestModal {
-  constructor(app, onChoose) {
+  constructor(app, onChoose, isExcluded) {
     super(app);
     this.onChoose = onChoose;
+    this.isExcluded = isExcluded || (() => false);
     this.setPlaceholder('Add a note to the chat context…');
   }
   getItems() {
-    return this.app.vault.getMarkdownFiles();
+    return this.app.vault.getMarkdownFiles().filter((f) => !this.isExcluded(f.path));
   }
   getItemText(f) {
     return f.path;
@@ -405,9 +455,10 @@ async function parseSseStream(resp, onText) {
 /* ------------------------------------------------------------------ */
 
 class VaultTools {
-  constructor(app, requestApproval) {
+  constructor(app, requestApproval, isExcluded) {
     this.app = app;
     this.requestApproval = requestApproval; // async (toolName, input) => boolean
+    this.isExcluded = isExcluded || (() => false); // (path) => boolean
   }
 
   async execute(name, input) {
@@ -434,7 +485,9 @@ class VaultTools {
   }
 
   getFile(path) {
-    const f = this.app.vault.getAbstractFileByPath(normalizePath(path));
+    const p = normalizePath(path);
+    if (this.isExcluded(p)) return null; // excluded paths behave as nonexistent
+    const f = this.app.vault.getAbstractFileByPath(p);
     return f instanceof TFile ? f : null;
   }
 
@@ -452,17 +505,19 @@ class VaultTools {
 
   async getActiveNote() {
     const f = this.app.workspace.getActiveFile();
-    if (!f) return { ok: false, text: 'No note is currently active.' };
+    if (!f || this.isExcluded(f.path)) return { ok: false, text: 'No note is currently active.' };
     const r = await this.readNote(f.path);
     return { ok: r.ok, text: 'Active note: ' + f.path + '\n\n' + r.text };
   }
 
   listFolder(path) {
     const p = !path || path === '/' ? '/' : normalizePath(path);
+    if (p !== '/' && this.isExcluded(p)) return { ok: false, text: 'Folder not found: ' + path };
     const folder =
       p === '/' ? this.app.vault.getRoot() : this.app.vault.getAbstractFileByPath(p);
     if (!(folder instanceof TFolder)) return { ok: false, text: 'Folder not found: ' + path };
     const lines = folder.children
+      .filter((c) => !this.isExcluded(c.path))
       .map((c) => (c instanceof TFolder ? c.name + '/' : c.name))
       .sort();
     return { ok: true, text: lines.join('\n') || '(empty folder)' };
@@ -474,7 +529,7 @@ class VaultTools {
     const prefix = folder ? normalizePath(folder) + '/' : null;
     const files = this.app.vault
       .getMarkdownFiles()
-      .filter((f) => !prefix || f.path.startsWith(prefix));
+      .filter((f) => (!prefix || f.path.startsWith(prefix)) && !this.isExcluded(f.path));
 
     const nameHits = [];
     const contentHits = [];
@@ -532,6 +587,8 @@ class VaultTools {
 
   async createNote(path, content) {
     const p = normalizePath(path);
+    if (this.isExcluded(p))
+      return { ok: false, text: 'Cannot create note at ' + p + ': this location is not accessible.' };
     if (this.app.vault.getAbstractFileByPath(p))
       return { ok: false, text: 'File already exists: ' + p + '. Use update_note instead.' };
     const approved = await this.requestApproval('create_note', { path: p, content: content });
@@ -570,7 +627,15 @@ class ClaudeMobileView extends ItemView {
     this.running = false;
     this.abortController = null;
     this.context = new ChatContext();
-    this.tools = new VaultTools(this.app, (name, input) => this.requestApproval(name, input));
+    this.tools = new VaultTools(
+      this.app,
+      (name, input) => this.requestApproval(name, input),
+      (path) => this.isPathExcluded(path)
+    );
+  }
+
+  isPathExcluded(path) {
+    return isPathExcluded(path, exclusionRules(this.app, this.plugin.settings));
   }
 
   getViewType() {
@@ -649,13 +714,17 @@ class ClaudeMobileView extends ItemView {
       attr: { 'aria-label': 'Add a note to the chat context' },
     });
     addBtn.onclick = () =>
-      new ContextFileSuggestModal(this.app, (path) => {
-        this.context.pin(path);
-        this.renderContextBar();
-      }).open();
+      new ContextFileSuggestModal(
+        this.app,
+        (path) => {
+          this.context.pin(path);
+          this.renderContextBar();
+        },
+        (path) => this.isPathExcluded(path)
+      ).open();
 
     const active = this.app.workspace.getActiveFile();
-    if (active) {
+    if (active && !this.isPathExcluded(active.path)) {
       const off = !this.context.includeActive;
       const pill = this.contextBarEl.createDiv({
         cls: 'claude-mobile-context-pill claude-mobile-context-active' + (off ? ' claude-mobile-context-off' : ''),
@@ -692,7 +761,10 @@ class ClaudeMobileView extends ItemView {
   /** Resolve + read the context set; skips (and unpins) files that no longer exist. */
   async collectContextDocs() {
     const active = this.app.workspace.getActiveFile();
-    const paths = this.context.resolvePaths(active ? active.path : null);
+    const activePath = active && !this.isPathExcluded(active.path) ? active.path : null;
+    const paths = this.context
+      .resolvePaths(activePath)
+      .filter((p) => !this.isPathExcluded(p));
     const docs = await readContextDocs(this.app, paths);
     let dropped = false;
     for (const d of docs) {
@@ -1125,6 +1197,31 @@ class ClaudeMobileSettingTab extends PluginSettingTab {
       .addTextArea((t) =>
         t.setValue(this.plugin.settings.extraSystemPrompt).onChange(async (v) => {
           this.plugin.settings.extraSystemPrompt = v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Private folders (hidden from Claude)')
+      .setDesc(
+        'One vault path per line (or comma-separated). Everything under these paths is invisible to Claude: excluded from reading, search, folder listings, writes, and the context bar. Note: applies to the API backend and this plugin\'s UI — the Mac relay reads files via the Agent SDK and does not enforce this list.'
+      )
+      .addTextArea((t) =>
+        t
+          .setPlaceholder('private\njournals/therapy')
+          .setValue(this.plugin.settings.excludedFolders)
+          .onChange(async (v) => {
+            this.plugin.settings.excludedFolders = v;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('Respect Obsidian\'s "Excluded files"')
+      .setDesc('Also hide everything matched by Options → Files and links → Excluded files.')
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.respectObsidianExcludes).onChange(async (v) => {
+          this.plugin.settings.respectObsidianExcludes = v;
           await this.plugin.saveSettings();
         })
       );

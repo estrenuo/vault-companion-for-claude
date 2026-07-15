@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Private folders: a settings list of vault paths hidden from Claude, plus a toggle (default on) to also honor Obsidian's *Excluded files*. Excluded paths are invisible to reading, search, folder listings, writes, the context bar, and the context file picker; excluded reads report "not found" so existence is not confirmed. Addresses the vault-enumeration concern for the API backend and plugin UI. The Mac relay backend reads files via the Agent SDK and is not bound by this list (documented).
+
 ## [1.5.0] - 2026-07-15
 
 ### Added

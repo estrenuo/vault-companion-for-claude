@@ -21,7 +21,7 @@ Module._resolveFilename = function (request, ...args) {
 // Load main.js with its module-private internals exposed for testing.
 const src =
   fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8') +
-  '\nmodule.exports.__test = { parseSseStream, VaultTools, ChatContext, readContextDocs, buildContextSection, contextSignature, buildRelayPrompt, ClaudeMobileView };';
+  '\nmodule.exports.__test = { parseSseStream, VaultTools, ChatContext, readContextDocs, buildContextSection, contextSignature, buildRelayPrompt, ClaudeMobileView, exclusionRules, isPathExcluded };';
 const tmp = path.join(os.tmpdir(), 'vcfc-main-test-' + Date.now() + '.js');
 fs.writeFileSync(tmp, src);
 const PluginClass = require(tmp);
@@ -34,8 +34,10 @@ const {
   contextSignature,
   buildRelayPrompt,
   ClaudeMobileView,
+  exclusionRules,
+  isPathExcluded,
 } = PluginClass.__test;
-const { TFile } = require('obsidian');
+const { TFile, TFolder } = require('obsidian');
 
 let failures = 0;
 async function test(name, fn) {
@@ -90,10 +92,33 @@ function fakeApp(files) {
     }
   }
   Object.setPrototypeOf(FTFile.prototype, TFile.prototype);
+  class FTFolder {
+    constructor(p) {
+      this.path = p;
+      this.name = p === '/' ? '/' : p.split('/').pop();
+    }
+    get children() {
+      const prefix = this.path === '/' ? '' : this.path + '/';
+      const seen = new Set();
+      const out = [];
+      for (const fp of Object.keys(files)) {
+        if (!fp.startsWith(prefix)) continue;
+        const rest = fp.slice(prefix.length);
+        const seg = rest.split('/')[0];
+        if (seen.has(seg)) continue;
+        seen.add(seg);
+        out.push(rest.includes('/') ? new FTFolder(prefix + seg) : new FTFile(fp));
+      }
+      return out;
+    }
+  }
+  Object.setPrototypeOf(FTFolder.prototype, TFolder.prototype);
+  const isFolder = (p) => Object.keys(files).some((fp) => fp.startsWith(p + '/'));
   return {
     app: {
       vault: {
-        getAbstractFileByPath: (p) => (files[p] !== undefined ? new FTFile(p) : null),
+        getAbstractFileByPath: (p) =>
+          files[p] !== undefined ? new FTFile(p) : isFolder(p) ? new FTFolder(p) : null,
         cachedRead: async (f) => files[f.path],
         getMarkdownFiles: () => Object.keys(files).map((p) => new FTFile(p)),
         create: async (p, c) => {
@@ -103,7 +128,7 @@ function fakeApp(files) {
           files[f.path] = c;
         },
         createFolder: async () => {},
-        getRoot: () => null,
+        getRoot: () => new FTFolder('/'),
       },
       workspace: { getActiveFile: () => new FTFile('index.md') },
     },
@@ -252,6 +277,7 @@ function fakeApp(files) {
       app: app,
       plugin: { settings: { includeClaudeMd: false, extraSystemPrompt: '' } },
       context: new ChatContext(),
+      isPathExcluded: ClaudeMobileView.prototype.isPathExcluded,
       addSystemNotice: () => {},
       renderContextBar: () => {},
     };
@@ -271,6 +297,7 @@ function fakeApp(files) {
       app: app,
       plugin: { settings: { includeClaudeMd: false, extraSystemPrompt: '' } },
       context: new ChatContext(),
+      isPathExcluded: ClaudeMobileView.prototype.isPathExcluded,
       addSystemNotice: (t) => notices.push(t),
       renderContextBar: () => {},
     };
@@ -279,6 +306,60 @@ function fakeApp(files) {
     assert.deepStrictEqual(docs.map((d) => d.path), ['index.md']);
     assert.ok(notices.length === 1 && notices[0].includes('gone.md'));
     assert.ok(!fake.context.pinned.includes('gone.md'));
+  });
+
+  await test('Exclusions: own prefixes and Obsidian filters (prefix + regex) match on folder boundaries', async () => {
+    const app = {
+      vault: { getConfig: (k) => (k === 'userIgnoreFilters' ? ['templates/', '/\\.tmp$/'] : null) },
+    };
+    const settings = { excludedFolders: 'private\nwork/secret', respectObsidianExcludes: true };
+    const rules = exclusionRules(app, settings);
+    assert.ok(isPathExcluded('private/a.md', rules));
+    assert.ok(isPathExcluded('work/secret/deep/x.md', rules));
+    assert.ok(!isPathExcluded('privateer.md', rules)); // folder boundary, not bare startsWith
+    assert.ok(isPathExcluded('templates/t.md', rules));
+    assert.ok(isPathExcluded('notes/x.tmp', rules));
+    assert.ok(!isPathExcluded('notes/x.md', rules));
+    const noObsidian = exclusionRules(app, { excludedFolders: 'private', respectObsidianExcludes: false });
+    assert.ok(!isPathExcluded('templates/t.md', noObsidian));
+  });
+
+  await test('VaultTools: excluded paths invisible to read, search, list, and writes', async () => {
+    const files = { 'open.md': 'public SECRETWORD? no', 'private/secret.md': 'SECRETWORD here' };
+    const { app } = fakeApp(files);
+    const excluded = (p) => p === 'private' || p.startsWith('private/');
+    const vt = new VaultTools(app, async () => true, excluded);
+    const read = await vt.execute('read_note', { path: 'private/secret.md' });
+    assert.ok(!read.ok && read.text.includes('not found'));
+    const search = await vt.execute('search_vault', { query: 'SECRETWORD' });
+    assert.ok(!search.text.includes('private/secret.md'));
+    const list = await vt.execute('list_folder', { path: '/' });
+    assert.ok(!list.text.includes('private'));
+    const listInside = await vt.execute('list_folder', { path: 'private' });
+    assert.ok(!listInside.ok);
+    const upd = await vt.execute('update_note', { path: 'private/secret.md', content: 'x' });
+    assert.ok(!upd.ok && files['private/secret.md'] === 'SECRETWORD here');
+    const crt = await vt.execute('create_note', { path: 'private/new.md', content: 'x' });
+    assert.ok(!crt.ok && files['private/new.md'] === undefined);
+    app.workspace.getActiveFile = () => app.vault.getAbstractFileByPath('private/secret.md');
+    const act = await vt.execute('get_active_note', {});
+    assert.ok(!act.ok && !act.text.includes('private/secret.md'));
+  });
+
+  await test('Context: excluded active note is not injected into the context', async () => {
+    const files = { 'private/secret.md': 'SECRETWORD' };
+    const { app } = fakeApp(files);
+    app.workspace.getActiveFile = () => app.vault.getAbstractFileByPath('private/secret.md');
+    const fake = {
+      app: app,
+      plugin: { settings: { includeClaudeMd: false, extraSystemPrompt: '', excludedFolders: 'private', respectObsidianExcludes: false } },
+      context: new ChatContext(),
+      isPathExcluded: ClaudeMobileView.prototype.isPathExcluded,
+      addSystemNotice: () => {},
+      renderContextBar: () => {},
+    };
+    const docs = await ClaudeMobileView.prototype.collectContextDocs.call(fake);
+    assert.deepStrictEqual(docs, []);
   });
 
   fs.unlinkSync(tmp);
