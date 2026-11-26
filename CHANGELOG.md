@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- API backend: every request that needed a tool failed with `API error 400: … each thinking block must contain thinking` on models that think by default (such as `claude-sonnet-5`). The streaming parser dropped thinking text and signatures, so thinking blocks went back to the API empty; it now keeps them intact. (#1)
+
 ## [1.6.1] - 2026-07-15
 
 ### Changed
