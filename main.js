@@ -396,6 +396,10 @@ async function parseSseStream(resp, onText) {
           if (onText) onText(ev.delta.text);
         } else if (ev.delta.type === 'input_json_delta') {
           partialJson[ev.index] += ev.delta.partial_json;
+        } else if (ev.delta.type === 'thinking_delta') {
+          blk.thinking = (blk.thinking || '') + ev.delta.thinking;
+        } else if (ev.delta.type === 'signature_delta') {
+          blk.signature = (blk.signature || '') + ev.delta.signature;
         }
         break;
       }

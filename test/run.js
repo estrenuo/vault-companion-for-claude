@@ -69,6 +69,23 @@ function sseFixture() {
   return events.map((e) => 'event: ' + e.type + '\ndata: ' + JSON.stringify(e) + '\n\n').join('');
 }
 
+function thinkingSseFixture() {
+  const events = [
+    { type: 'message_start' },
+    { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Check the ' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'vault root.' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'EqQBCgIYAhIM' } },
+    { type: 'content_block_stop', index: 0 },
+    { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'tu_1', name: 'list_folder', input: {} } },
+    { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"path":"/"}' } },
+    { type: 'content_block_stop', index: 1 },
+    { type: 'message_delta', delta: { stop_reason: 'tool_use' } },
+    { type: 'message_stop' },
+  ];
+  return events.map((e) => 'event: ' + e.type + '\ndata: ' + JSON.stringify(e) + '\n\n').join('');
+}
+
 function chunkedResponse(sse, chunkSize) {
   const chunks = [];
   for (let i = 0; i < sse.length; i += chunkSize) chunks.push(sse.slice(i, i + chunkSize));
@@ -156,6 +173,12 @@ function fakeApp(files) {
   await test('SSE: fallback path without ReadableStream', async () => {
     const r = await parseSseStream({ text: async () => sseFixture() }, () => {});
     assert.strictEqual(r.blocks.find((b) => b.type === 'tool_use').input.path, 'index.md');
+  });
+
+  await test('SSE: thinking block assembled from thinking and signature deltas', async () => {
+    const r = await parseSseStream(chunkedResponse(thinkingSseFixture(), 7), () => {});
+    assert.deepStrictEqual(r.blocks[0], { type: 'thinking', thinking: 'Check the vault root.', signature: 'EqQBCgIYAhIM' });
+    assert.strictEqual(r.blocks[1].type, 'tool_use');
   });
 
   await test('VaultTools: read, search, active note', async () => {
